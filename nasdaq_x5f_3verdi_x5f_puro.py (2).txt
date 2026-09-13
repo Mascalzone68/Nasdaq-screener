@@ -1,0 +1,75 @@
+
+# NASDAQ - 3 candele verdi daily + Volume > SMA20 - NESSUN ALTRO FILTRO
+# Installa: pip install finviz yfinance pandas lxml
+
+from finviz.screener import Screener
+import yfinance as yf
+import pandas as pd
+import time
+from datetime import datetime
+
+print(f"[{datetime.now()}] Avvio screener NASDAQ puro...")
+
+# NESSUN FILTRO extra come richiesto - solo Exchange NASDAQ
+filters = ['exch_nasd']
+try:
+    stock_list = Screener(filters=filters, table='Overview')
+    tickers = [s['Ticker'] for s in stock_list]
+    print(f"Trovati {len(tickers)} ticker NASDAQ da Finviz")
+except Exception as e:
+    print(f"Errore Finviz, uso lista NASDAQ100 fallback: {e}")
+    tickers = ["AAPL","MSFT","NVDA","AMZN","GOOGL","META","TSLA","AVGO","COST","NFLX"] # fallback esempio
+
+risultati = []
+
+for i, ticker in enumerate(tickers):
+    try:
+        # 1 mese per calcolare SMA20
+        df = yf.download(ticker, period="1mo", interval="1d", progress=False, auto_adjust=False, threads=False)
+        if len(df) < 22:
+            continue
+        # ultimi 3 giorni
+        last3 = df.tail(3)
+        
+        # 3 verdi: Close > Open
+        verdi = all(float(last3.iloc[j]['Close']) > float(last3.iloc[j]['Open']) for j in range(3))
+        if not verdi:
+            continue
+
+        vol_oggi = float(df.iloc[-1]['Volume'])
+        sma20_vol = float(df['Volume'].tail(20).mean())
+        
+        # Volume > SMA20
+        if vol_oggi <= sma20_vol:
+            continue
+
+        close_oggi = float(df.iloc[-1]['Close'])
+        open_oggi = float(df.iloc[-1]['Open'])
+        
+        risultati.append({
+            'Ticker': ticker,
+            'Prezzo': round(close_oggi, 2),
+            'Open_oggi': round(open_oggi, 2),
+            'Vol_oggi': int(vol_oggi),
+            'SMA20_Vol': int(sma20_vol),
+            'Ratio_Vol': round(vol_oggi / sma20_vol, 2) if sma20_vol>0 else 0,
+            'Chiusura_1': round(float(last3.iloc[0]['Close']),2),
+            'Chiusura_2': round(float(last3.iloc[1]['Close']),2),
+            'Chiusura_3': round(float(last3.iloc[2]['Close']),2),
+        })
+        
+        if i % 100 == 0:
+            print(f"Controllati {i}/{len(tickers)} - trovati finora: {len(risultati)}")
+            
+        time.sleep(0.05)
+    except Exception as e:
+        continue
+
+df_ris = pd.DataFrame(risultati).sort_values('Ratio_Vol', ascending=False)
+nome_file = f"NASDAQ_3verdi_Daily_VolSMA20_{datetime.now().strftime('%Y-%m-%d')}.csv"
+df_ris.to_csv(nome_file, index=False)
+
+print("\n" + "="*50)
+print(f"FINITO: {len(df_ris)} titoli trovati")
+print(f"File salvato: {nome_file}")
+print(df_ris.head(50).to_string(index=False))
